@@ -12,9 +12,23 @@ from docx.oxml.ns import qn
 WHITESPACE = r"\t \u00a0\u3000"
 CJK = r"\u3400-\u4dbf\u4e00-\u9fff\uf900-\ufaff"
 BULLET_SPACE_PATTERN = re.compile(rf"•(?P<spaces>[{WHITESPACE}]+)")
-BOUNDARY_SPACE_PATTERN = re.compile(
-    rf"(?<=[{CJK}])[{WHITESPACE}]+(?=[A-Za-z0-9])"
-    rf"|(?<=[A-Za-z0-9])[{WHITESPACE}]+(?=[{CJK}])"
+OPENING_PUNCT = r"\(\[{<（【《〈“‘〔「『"
+CLOSING_PUNCT = r"\)\]}>）】》〉”’〕」』"
+INLINE_SPACE_PATTERNS = (
+    re.compile(
+        rf"(?<=[{CJK}])[{WHITESPACE}]+(?=[A-Za-z0-9])"
+        rf"|(?<=[A-Za-z0-9])[{WHITESPACE}]+(?=[{CJK}])"
+    ),
+    re.compile(
+        rf"(?<=[0-9])[{WHITESPACE}]+(?=[A-Za-z])"
+        rf"|(?<=[A-Za-z])[{WHITESPACE}]+(?=[0-9])"
+    ),
+    re.compile(
+        rf"(?<=[A-Za-z0-9])[{WHITESPACE}]+(?=[/／])"
+        rf"|(?<=[/／])[{WHITESPACE}]+(?=[A-Za-z0-9])"
+    ),
+    re.compile(rf"(?<=[{CJK}])[{WHITESPACE}]+(?=[{OPENING_PUNCT}])"),
+    re.compile(rf"(?<=[{CLOSING_PUNCT}])[{WHITESPACE}]+(?=[{CJK}])"),
 )
 AUTO_SPACE_TAGS = ("w:autoSpaceDE", "w:autoSpaceDN")
 SUCCESSOR_TAGS = (
@@ -73,14 +87,15 @@ def clean_paragraph_text(paragraph):
 
     text = "".join(node.text or "" for node in nodes)
     bullet_offsets = set()
-    boundary_offsets = set()
+    inline_offsets = set()
 
     for match in BULLET_SPACE_PATTERN.finditer(text):
         bullet_offsets.update(range(*match.span("spaces")))
-    for match in BOUNDARY_SPACE_PATTERN.finditer(text):
-        boundary_offsets.update(range(*match.span()))
+    for pattern in INLINE_SPACE_PATTERNS:
+        for match in pattern.finditer(text):
+            inline_offsets.update(range(*match.span()))
 
-    offsets = bullet_offsets | boundary_offsets
+    offsets = bullet_offsets | inline_offsets
     if not offsets:
         return 0, 0
 
@@ -97,7 +112,7 @@ def clean_paragraph_text(paragraph):
             node.text = updated
         cursor += len(original)
 
-    return len(bullet_offsets), len(boundary_offsets)
+    return len(bullet_offsets), len(inline_offsets)
 
 
 def disable_auto_spacing(paragraph):
@@ -124,14 +139,14 @@ def clean_document(input_path, output_path):
     paragraph_count = 0
     auto_spacing_changed = 0
     bullet_spaces_removed = 0
-    boundary_spaces_removed = 0
+    inline_spaces_removed = 0
 
     for root in paragraph_roots(document):
         for paragraph in root.iter(qn("w:p")):
             paragraph_count += 1
-            bullets, boundaries = clean_paragraph_text(paragraph)
+            bullets, inline_spaces = clean_paragraph_text(paragraph)
             bullet_spaces_removed += bullets
-            boundary_spaces_removed += boundaries
+            inline_spaces_removed += inline_spaces
             auto_spacing_changed += int(disable_auto_spacing(paragraph))
 
     document.save(output_path)
@@ -139,15 +154,15 @@ def clean_document(input_path, output_path):
         "paragraphs": paragraph_count,
         "auto_spacing_changed": auto_spacing_changed,
         "bullet_spaces_removed": bullet_spaces_removed,
-        "boundary_spaces_removed": boundary_spaces_removed,
+        "inline_spaces_removed": inline_spaces_removed,
     }
 
 
 def main():
     parser = argparse.ArgumentParser(
         description=(
-            "Remove spaces after bullet markers and at CJK/Latin or CJK/digit "
-            "boundaries in a DOCX."
+            "Remove spaces after bullet markers and at CJK, digit, Latin, "
+            "slash, and bracket boundaries in a DOCX."
         )
     )
     parser.add_argument("input", type=Path, help="Source .docx")
@@ -165,7 +180,7 @@ def main():
         f"paragraphs={result['paragraphs']} "
         f"auto_spacing_changed={result['auto_spacing_changed']} "
         f"bullet_spaces_removed={result['bullet_spaces_removed']} "
-        f"boundary_spaces_removed={result['boundary_spaces_removed']}"
+        f"inline_spaces_removed={result['inline_spaces_removed']}"
     )
 
 

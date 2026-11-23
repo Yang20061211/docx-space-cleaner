@@ -1,0 +1,4 @@
+interface:
+  display_name: "DOCX Space Cleaner"
+  short_description: "Remove CJK and bullet spacing from Word documents"
+  default_prompt: "Use $docx-space-cleaner to remove unwanted CJK, digit, and bullet spacing from this DOCX."
